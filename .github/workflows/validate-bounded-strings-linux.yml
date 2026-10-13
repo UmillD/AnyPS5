@@ -1,0 +1,29 @@
+name: Validate bounded string reads on Linux
+
+on:
+  push:
+    branches: [validation/libc-bounded-string-reads]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  strings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Install build requirements
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev libpipewire-0.3-dev libpulse-dev libasound2-dev
+      - name: Configure the project with tests
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+      - name: Compile the real guest string test and dependencies
+        run: cmake --build build --target guest_string_tests --parallel 2
+      - name: Run the complete guest string test
+        run: ctest --test-dir build -R '^guest_strings$' --no-tests=error --output-on-failure --timeout 30 --output-log bounded-strings-linux.log --output-junit bounded-strings-linux.xml
