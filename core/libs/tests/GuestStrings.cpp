@@ -5,6 +5,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 extern "C" {
 char* APS5_VABI basename_nid_postfix(const char*);
@@ -43,6 +49,51 @@ static void Require(bool condition) {
         std::fputs("Guest string check failed\n", stderr);
         std::abort();
     }
+}
+
+static void CheckBoundedStringReads() {
+#ifdef _WIN32
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    const std::size_t pageSize = info.dwPageSize;
+    auto* pages = static_cast<char*>(VirtualAlloc(nullptr, pageSize * 2, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    Require(pages != nullptr);
+    DWORD oldProtection = 0;
+    Require(VirtualProtect(pages + pageSize, pageSize, PAGE_NOACCESS, &oldProtection) != 0);
+#else
+    const long nativePageSize = sysconf(_SC_PAGESIZE);
+    Require(nativePageSize > 0);
+    const auto pageSize = static_cast<std::size_t>(nativePageSize);
+    auto* pages = static_cast<char*>(mmap(nullptr, pageSize * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    Require(pages != MAP_FAILED);
+    Require(mprotect(pages + pageSize, pageSize, PROT_NONE) == 0);
+#endif
+    char* bounded = pages + pageSize - 4;
+    std::memcpy(bounded, "abca", 4);
+    Require(strnlen_nid_postfix(bounded, 4) == 4);
+    Require(strnlen_nid_postfix(bounded, 3) == 3);
+    Require(strnlen_s_nid_postfix(bounded, 4) == 4);
+    Require(strnstr_nid_postfix(bounded, "ca", 4) == bounded + 2);
+    Require(strnstr_nid_postfix(bounded, "ca", 3) == nullptr);
+    Require(strnstr_nid_postfix(bounded, "az", 4) == nullptr);
+    Require(strnstr_nid_postfix(bounded, "abcab", 4) == nullptr);
+    Require(strnstr_nid_postfix(bounded, "", 4) == bounded);
+    bounded[3] = '\0';
+    Require(strnlen_nid_postfix(bounded, pageSize) == 3);
+    Require(strnlen_s_nid_postfix(bounded, pageSize) == 3);
+    Require(strnstr_nid_postfix(bounded, "abc", pageSize) == bounded);
+    Require(strnstr_nid_postfix(bounded, "abcd", pageSize) == nullptr);
+    Require(strnstr_nid_postfix(bounded, "z", pageSize) == nullptr);
+    char* protectedPage = pages + pageSize;
+    Require(strnlen_nid_postfix(protectedPage, 0) == 0);
+    Require(strnlen_s_nid_postfix(protectedPage, 0) == 0);
+    Require(strnstr_nid_postfix(protectedPage, "a", 0) == nullptr);
+    Require(strnstr_nid_postfix(protectedPage, "", 0) == protectedPage);
+#ifdef _WIN32
+    Require(VirtualFree(pages, 0, MEM_RELEASE) != 0);
+#else
+    Require(munmap(pages, pageSize * 2) == 0);
+#endif
 }
 
 static bool CheckMemcpyOverlap() {
@@ -213,6 +264,7 @@ static bool CheckDirnameLengths() {
 }
 
 int main() {
+    CheckBoundedStringReads();
     if (!CheckDirnameLengths()) return 1;
     CheckBoundsCheckedFunctions();
     CheckCaseInsensitiveComparison();
