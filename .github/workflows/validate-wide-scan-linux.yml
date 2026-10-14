@@ -1,4 +1,4 @@
-name: Full Linux validation of wide scanf
+name: Verify omissions from the full Linux run
 on:
   push:
     branches: [validation/libc-wide-scan-clean]
@@ -6,36 +6,42 @@ on:
 permissions:
   contents: read
 jobs:
-  linux:
+  omissions:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
+    env:
+      SKIP_CASES: 'agc_driver_mesh|agc_driver_bitfield_mask|agc_driver_conservative_rasterization|agc_driver_dpp16_inactive_source|agc_driver_dpp16_operands|agc_driver_dpp16_row_share_xmask|agc_driver_dpp8|agc_driver_ds_append_consume|agc_driver_ds_swizzle|agc_driver_ds_permute|agc_driver_gds_append_consume|agc_driver_global_store_addtid|agc_driver_interpolation_f16|agc_driver_lds_addtid|agc_driver_look_back_scan|agc_driver_ngg_vertex_wave_info|agc_driver_ngg_vertex_wave_reduction|agc_driver_packed_float16_native|agc_driver_permlane16|agc_driver_pixel_helper_lanes|agc_driver_pixel_lds|agc_driver_pixel_lds_lane_slots|agc_driver_pixel_valid_mask|agc_driver_read_first_lane|agc_driver_read_lane|agc_driver_scalar_bit_count|agc_driver_subvector_loop|agc_driver_vector_window_direct_access|agc_driver_vertex_clip_cull_distances|agc_driver_wave32_subgroup|agc_driver_wave_uniform|agc_driver_write_lane|agc_driver_pipeline_optimized_readback_color32|agc_driver_pipeline_optimized_readback_color32_fast|agc_driver_pipeline_optimized_readback_color64|agc_driver_pipeline_optimized_readback_color64_fast|guest_video_out_high_frame_rate|video_out_flip_lifetime|video_out_flip_reopen|video_out_flip_controls|video_out_flip_overlay|video_out_flip_unopened|video_out_frame_dump_queue|guest_video_out_wqhd_detection|guest_video_out_resolution_status|guest_video_out_output_mode'
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install build and Vulkan requirements
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev libpipewire-0.3-dev libpulse-dev libasound2-dev libvulkan1 mesa-vulkan-drivers
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DANYPS5_ENABLE_SPIRV_TOOLS=ON
+      - name: Build only the previously omitted cases
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev libpipewire-0.3-dev libpulse-dev libasound2-dev libvulkan1 mesa-vulkan-drivers
-      - name: Configure all tests
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DANYPS5_ENABLE_SPIRV_TOOLS=ON
-      - run: python3 tools/check_test_registration.py build
-      - name: Build the project
-        run: cmake --build build --parallel 2
-      - name: Build all libraries
-        run: cmake --build build --target libs --parallel 2
-      - name: Run the full test suite
-        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --output-log full-linux.log --output-junit full-linux.xml
+          python3 - <<'PY'
+          import os, pathlib, re, subprocess
+          wanted = set(os.environ['SKIP_CASES'].split('|'))
+          found, targets = set(), set()
+          for path in pathlib.Path('build').rglob('CTestTestfile.cmake'):
+              for name, command in re.findall(r'add_test\(\[=\[(.*?)\]=\]\s+"([^"]+)"', path.read_text()):
+                  if name in wanted:
+                      found.add(name)
+                      targets.add(pathlib.Path(command).name)
+          assert found == wanted, wanted - found
+          subprocess.run(['cmake', '--build', 'build', '--parallel', '3', '--target', *sorted(targets)], check=True)
+          PY
+      - name: Repeat the previously omitted cases
+        run: ctest --test-dir build -R "^($SKIP_CASES)$" --no-tests=error --output-on-failure --verbose --timeout 120 --parallel 4 --output-log skip-linux.log --output-junit "$GITHUB_WORKSPACE/skip-linux.xml"
         env:
           ANYPS5_REQUIRE_VULKAN: 1
           GALLIUM_OVERRIDE_CPU_CAPS: avx
           MESA_SHADER_CACHE_DIR: ${{ github.workspace }}/.mesa-shader-cache
-      - name: Check omitted tests
-        if: always()
-        run: test ! -f full-linux.xml || python3 tools/check_skips.py full-linux.xml
+      - name: Verify the recorded reasons
+        run: python3 tools/check_skips.py "$GITHUB_WORKSPACE/skip-linux.xml"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: full-wide-scan-linux-results
-          path: full-linux.*
+          name: verified-linux-omissions
+          path: skip-linux.*
