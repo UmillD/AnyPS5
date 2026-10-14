@@ -9,6 +9,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <memory>
+#include <vector>
 
 #include "prx/libc/include/General.hpp"
 #include "SceTypes.hpp"
@@ -43,6 +44,24 @@ bool HasGuestWideFormat(const char* format) {
     return false;
 }
 
+bool HasGuestWideScan(const char* format) {
+    if (!format) return false;
+    while ((format = std::strchr(format, '%')) != nullptr) {
+        ++format;
+        if (*format == '%') { ++format; continue; }
+        if (*format == '*') ++format;
+        while (*format >= '0' && *format <= '9') ++format;
+        if (*format == 'l' && format[1] && std::strchr("sc[", format[1])) return true;
+        if (*format == '[') {
+            ++format;
+            if (*format == '^') ++format;
+            if (*format == ']') ++format;
+            while (*format && *format != ']') ++format;
+        }
+        if (*format) ++format;
+    }
+    return false;
+}
 void RejectGuestWideScan(const char* format) {
     if (format == nullptr) return;
     while ((format = std::strchr(format, '%')) != nullptr) {
@@ -176,11 +195,15 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
             width = wanted == 0 ? limit : std::min(wanted, limit);
         }
         if (width != 0) directive += std::to_string(width);
-        directive += HostLength(length, conversion);
+        const bool guestWide = sizeof(wchar_t) > sizeof(char16_t) && length == "l" && std::strchr("sc[", conversion) != nullptr;
+        directive += guestWide ? "" : HostLength(length, conversion);
         directive += specifier;
         directive += "%n";
         int consumed = -1;
-        const int matched = suppress ? HostSscanf(input, directive.c_str(), &consumed) : HostSscanf(input, directive.c_str(), target, &consumed);
+        std::vector<char> narrow;
+        if (guestWide && !suppress) narrow.resize(std::strlen(input) + 1);
+        void* nativeTarget = narrow.empty() ? target : narrow.data();
+        const int matched = suppress ? HostSscanf(input, directive.c_str(), &consumed) : HostSscanf(input, directive.c_str(), nativeTarget, &consumed);
         if (consumed < 0 || (!suppress && matched != 1)) return finish(!converted && *input == '\0' ? EOF : assigned);
         if (capped && conversion != 'c') {
             const char next = input[consumed];
@@ -195,6 +218,12 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
                 static_cast<char*>(target)[0] = '\0';
                 return finish(assigned);
             }
+        }
+        if (guestWide && !suppress) {
+            auto* wide = static_cast<char16_t*>(target);
+            const auto count = conversion == 'c' ? static_cast<std::size_t>(consumed) : std::strlen(narrow.data());
+            for (std::size_t i = 0; i < count; ++i) wide[i] = static_cast<unsigned char>(narrow[i]);
+            if (conversion != 'c') wide[count] = u'\0';
         }
         input += consumed;
         converted = true;
@@ -371,6 +400,10 @@ int APS5_VABI vsscanf_nid_postfix(const char* input, const char* format, VaList*
 #ifdef _WIN32
     return LibcDetail::ScanWindows(input, format, args);
 #else
+    if (HasGuestWideScan(format)) {
+        LibcDetail::FormatArguments arguments(args);
+        return ScanGuest(input, format, false, [&] { return arguments.Next<void*>(); }, [] { return 0u; });
+    }
     RejectGuestWideScan(format);
     std::va_list copy;
     va_copy(copy, *reinterpret_cast<std::va_list*>(args));
@@ -390,10 +423,10 @@ int APS5_VABI sscanf_nid_postfix(const char* input, const char* format, ...) {
 }
 #else
 int APS5_VABI sscanf_nid_postfix(const char* input, const char* format, ...) {
-    RejectGuestWideScan(format);
+    if (!HasGuestWideScan(format)) RejectGuestWideScan(format);
     std::va_list args;
     va_start(args, format);
-    const int result = HostVsscanf(input, format, args);
+    const int result = HasGuestWideScan(format) ? ScanGuest(input, format, false, [&] { return va_arg(args, void*); }, [] { return 0u; }) : HostVsscanf(input, format, args);
     va_end(args);
     return result;
 }
