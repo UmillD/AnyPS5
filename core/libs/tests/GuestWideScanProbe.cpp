@@ -4,9 +4,11 @@
 #include <cstdio>
 #include <exception>
 #include <cstdlib>
+#include <cstring>
 
 extern "C" int APS5_VABI sscanf_nid_postfix(const char*, const char*, ...);
 extern "C" int APS5_VABI vsscanf_nid_postfix(const char*, const char*, VaList*);
+extern "C" void APS5_VABI free_nid_postfix(void*);
 
 static int ScanList(const char* input, const char* format, ...) {
     std::va_list args;
@@ -66,9 +68,18 @@ int main() {
         const int nativeMixed = std::sscanf("a word", "%lc %ms", native, &nativeAllocated);
         const int guestMixed = scan("a word", "%lc %ms", output.data(), &allocated);
         std::printf("allocated mixed: host=%d guest=%d\n", nativeMixed, guestMixed);
-        if (guestMixed != nativeMixed) ++failures;
+        if (guestMixed != nativeMixed || !allocated || std::strcmp(allocated, "word") != 0) ++failures;
         std::free(nativeAllocated);
-        std::free(allocated);
+        free_nid_postfix(allocated);
+        allocated = nullptr;
+        if (scan("a xy", "%lc %2mc", output.data(), &allocated) != 2 || !allocated || std::memcmp(allocated, "xy", 2) != 0) ++failures;
+        free_nid_postfix(allocated);
+        allocated = nullptr;
+        if (scan("a abc1", "%lc %m[a-z]", output.data(), &allocated) != 2 || !allocated || std::strcmp(allocated, "abc") != 0) ++failures;
+        free_nid_postfix(allocated);
+        char16_t* allocatedWide = nullptr;
+        if (scan("abc", "%2mls", &allocatedWide) != 1 || !allocatedWide || allocatedWide[0] != u'a' || allocatedWide[1] != u'b' || allocatedWide[2] != 0) ++failures;
+        free_nid_postfix(allocatedWide);
     }
     std::printf("wide scan failures: %d\n", failures);
     return failures != 0;

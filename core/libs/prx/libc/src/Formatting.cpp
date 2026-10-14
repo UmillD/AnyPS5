@@ -9,7 +9,6 @@
 #include <cerrno>
 #include <cstdlib>
 #include <memory>
-#include <vector>
 
 #include "prx/libc/include/General.hpp"
 #include "SceTypes.hpp"
@@ -38,6 +37,7 @@ bool HasGuestWideFormat(const char* format) {
         ++format;
         if (*format == '%') { ++format; continue; }
         while (*format && std::strchr("-+ #0'0123456789.*$", *format)) ++format;
+        if (*format == 'm') ++format;
         if (*format == 'S' || *format == 'C' || *format == 'm' || (*format == 'l' && (format[1] == 's' || format[1] == 'c'))) return true;
         if (*format) ++format;
     }
@@ -51,6 +51,7 @@ bool HasGuestWideScan(const char* format) {
         if (*format == '%') { ++format; continue; }
         if (*format == '*') ++format;
         while (*format >= '0' && *format <= '9') ++format;
+        if (*format == 'm') ++format;
         if (*format == 'l' && format[1] && std::strchr("sc[", format[1])) return true;
         if (*format == '[') {
             ++format;
@@ -68,6 +69,7 @@ void RejectGuestWideScan(const char* format, bool allowStandard = false) {
         ++format;
         if (*format == '%') { ++format; continue; }
         while (*format && std::strchr("-+ #0'0123456789.*$", *format)) ++format;
+        if (*format == 'm') ++format;
         if (*format == 'S' || *format == 'C' || (!allowStandard && *format == 'l' && format[1] != '\0' && std::strchr("sc[", format[1])))
             NotImplemented_nid_no_patch("scanf 16-bit wide conversion on Linux");
         if (*format == '[') {
@@ -143,6 +145,8 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
         if (suppress) ++cursor;
         unsigned long width = 0;
         while (std::isdigit(static_cast<unsigned char>(*cursor))) width = width * 10 + static_cast<unsigned long>(*cursor++ - '0');
+        const bool allocate = *cursor == 'm';
+        if (allocate) ++cursor;
         const char* lengthStart = cursor;
         while (std::strchr("hljztL", *cursor) != nullptr && *cursor != '\0') ++cursor;
         const std::string length(lengthStart, cursor);
@@ -196,14 +200,16 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
         }
         if (width != 0) directive += std::to_string(width);
         const bool guestWide = sizeof(wchar_t) > sizeof(char16_t) && length == "l" && std::strchr("sc[", conversion) != nullptr;
+        const bool nativeAllocation = !suppress && (guestWide || allocate);
+        if (nativeAllocation) directive += 'm';
         directive += guestWide ? "" : HostLength(length, conversion);
         directive += specifier;
         directive += "%n";
         int consumed = -1;
-        std::vector<char> narrow;
-        if (guestWide && !suppress) narrow.resize(std::strlen(input) + 1);
-        void* nativeTarget = narrow.empty() ? target : narrow.data();
+        char* allocated = nullptr;
+        void* nativeTarget = nativeAllocation ? &allocated : target;
         const int matched = suppress ? HostSscanf(input, directive.c_str(), &consumed) : HostSscanf(input, directive.c_str(), nativeTarget, &consumed);
+        std::unique_ptr<char, decltype(&std::free)> narrow(allocated, std::free);
         if (consumed < 0 || (!suppress && matched != 1)) return finish(!converted && *input == '\0' ? EOF : assigned);
         if (capped && conversion != 'c') {
             const char next = input[consumed];
@@ -219,11 +225,17 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
                 return finish(assigned);
             }
         }
-        if (guestWide && !suppress) {
-            auto* wide = static_cast<char16_t*>(target);
-            const auto count = conversion == 'c' ? static_cast<std::size_t>(consumed) : std::strlen(narrow.data());
-            for (std::size_t i = 0; i < count; ++i) wide[i] = static_cast<unsigned char>(narrow[i]);
-            if (conversion != 'c') wide[count] = u'\0';
+        if (nativeAllocation) {
+            const auto count = conversion == 'c' ? static_cast<std::size_t>(consumed) : std::strlen(narrow.get());
+            const auto units = count + (conversion != 'c');
+            void* destination = target;
+            if (allocate) destination = ApplicationHeapAllocate_nid_no_patch(units * (guestWide ? sizeof(char16_t) : 1));
+            if (guestWide) {
+                auto* wide = static_cast<char16_t*>(destination);
+                for (std::size_t i = 0; i < count; ++i) wide[i] = static_cast<unsigned char>(narrow.get()[i]);
+                if (conversion != 'c') wide[count] = u'\0';
+            } else std::memcpy(destination, narrow.get(), units);
+            if (allocate) *static_cast<void**>(target) = destination;
         }
         input += consumed;
         converted = true;
