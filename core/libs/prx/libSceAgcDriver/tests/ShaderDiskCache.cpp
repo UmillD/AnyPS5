@@ -1,3 +1,4 @@
+#include "../../../tests/FilesystemTestCleanup.hpp"
 #include "ShaderDiskCache.hpp"
 #include "CacheKey.hpp"
 #include "VertexInputSpecialization.hpp"
@@ -1855,7 +1856,7 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string_view(argv[1]) == "--no-failure-memo") return runWithoutFailureMemo();
         if (argc == 2 && std::string_view(argv[1]).starts_with("--load-plan")) return runPlanLoadingProcess(argv[1]);
         const auto directory = std::filesystem::temp_directory_path() / ("aps5-shader-disk-cache-test-" + std::to_string(std::random_device{}()));
-        std::filesystem::remove_all(directory);
+        TestFilesystem::RemoveTree(directory);
         verifyDefaultDirectory(argv[0]);
         setEnvironment("ANYPS5_NO_SHADER_CACHE", "0");
         setEnvironment("ANYPS5_SHADER_CACHE_DIR", directory.string());
@@ -1879,9 +1880,7 @@ int main(int argc, char** argv) {
         verifyBuiltinSpecialization();
         verifySpecializationLiveness();
         ShaderRecompiler::ShaderDiskCache::Flush();
-        std::error_code error;
-        std::filesystem::remove_all(directory, error);
-        require(!error, "cannot remove the shader cache test directory: " + error.message());
+        TestFilesystem::RemoveTree(directory);
         std::cout << "shader disk cache tests passed\n";
         return 0;
     } catch (const std::exception& error) {

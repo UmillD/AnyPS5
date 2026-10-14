@@ -1,3 +1,4 @@
+#include "FilesystemTestCleanup.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include <chrono>
@@ -505,6 +506,6 @@ int main() {
         Require(!std::filesystem::exists(std::filesystem::symlink_status(throughLink)));
     }
 #endif
-    std::filesystem::remove_all(root);
+    TestFilesystem::RemoveTree(root);
     return 0;
 }

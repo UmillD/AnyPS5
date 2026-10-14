@@ -1,3 +1,4 @@
+#include "FilesystemTestCleanup.hpp"
 #include "SceTypes.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/General.hpp"
@@ -200,7 +201,7 @@ static void TestParentTraversal() {
     const int created = sceKernelOpen("Existing/../new.txt", 0x601, 0600);
     Require(created >= 0 && sceKernelClose(created) == 0);
     Require(chdir_nid_postfix("/") == 0);
-    std::filesystem::remove_all(root);
+    TestFilesystem::RemoveTree(root);
 }
 
 static void TestRelinkedModuleNames() {
@@ -227,7 +228,7 @@ static void TestRelinkedModuleNames() {
     const int created = sceKernelOpen(original.c_str(), 0x601, 0600);
     Require(created >= 0 && sceKernelClose(created) == 0);
     Require(std::filesystem::file_size(original) == 0 && std::filesystem::file_size(relinked) == 8);
-    std::filesystem::remove_all(root);
+    TestFilesystem::RemoveTree(root);
 }
 
 int main() {
@@ -483,7 +484,7 @@ int main() {
         Require(rename_nid_postfix(name(replacement).c_str(), name(dangling).c_str()) == 0);
         Require(!std::filesystem::is_symlink(dangling) && std::filesystem::is_regular_file(dangling));
 #endif
-        std::filesystem::remove_all(area);
+        TestFilesystem::RemoveTree(area);
     }
     Require(remove_nid_postfix(file.string().c_str()) == 0);
     Require(!std::filesystem::exists(file));
