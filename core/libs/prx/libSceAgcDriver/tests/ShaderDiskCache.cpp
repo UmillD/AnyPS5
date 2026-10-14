@@ -508,6 +508,38 @@ void verifyFloatModeSerialization() {
     require(back.request.context.floatMode == mode, "the float mode did not survive serialization");
 }
 
+bool emptyAfterDeletion(const std::filesystem::path& directory) {
+#ifdef _WIN32
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+    for (;;) {
+        std::error_code error;
+        auto entry = std::filesystem::directory_iterator(directory, error);
+        if (error) return false;
+        bool empty = true;
+        for (; entry != std::filesystem::directory_iterator{}; entry.increment(error)) {
+            if (error) return false;
+            empty = false;
+            const auto path = entry->path();
+            const auto attributes = GetFileAttributesW(path.c_str());
+            const auto missing = GetLastError();
+            if (attributes != INVALID_FILE_ATTRIBUTES) {
+                if (attributes & FILE_ATTRIBUTE_DIRECTORY) return false;
+                std::vector<std::byte> bytes;
+                if (ReadWholeFile(path, bytes)) return false;
+            } else if (missing != ERROR_FILE_NOT_FOUND && missing != ERROR_PATH_NOT_FOUND && missing != ERROR_ACCESS_DENIED) {
+                return false;
+            }
+        }
+        if (error) return false;
+        if (empty) return true;
+        if (std::chrono::steady_clock::now() >= deadline) return false;
+        Sleep(1);
+    }
+#else
+    return std::filesystem::is_empty(directory);
+#endif
+}
+
 void verifyAtomicReplacement(const std::filesystem::path& directory) {
     struct Reader {
 #ifdef _WIN32
@@ -571,8 +603,13 @@ void verifyAtomicReplacement(const std::filesystem::path& directory) {
         require(!ReadWholeFile(path, fresh), "the deleted cache entry remains readable by path");
         require(old.Read() == original && current.Read() == replacement, "deletion invalidated retained cache readers");
     }
-    require(std::filesystem::is_empty(root), "atomic replacement left a temporary file behind");
-    require(std::filesystem::remove(root), "cannot remove the empty replacement directory");
+    require(emptyAfterDeletion(root), "atomic replacement left a temporary file behind");
+    const auto unexpected = root / "unexpected.tmp";
+    { std::ofstream file(unexpected); file << "temporary"; require(file.good(), "cannot create the temporary-file check"); }
+    require(!emptyAfterDeletion(root), "the empty-directory check accepted a temporary file");
+    require(std::filesystem::remove(unexpected), "cannot remove the temporary-file check");
+    require(emptyAfterDeletion(root), "the temporary-file check was not removed");
+    TestFilesystem::RemoveTree(root);
 }
 
 void verifyStore() {
