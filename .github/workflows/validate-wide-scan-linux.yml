@@ -1,34 +1,41 @@
-name: Validate guest wide scanf on Linux
-
+name: Full Linux validation of wide scanf
 on:
   push:
     branches: [validation/libc-wide-scan-clean]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
-  filesystem:
+  linux:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
           submodules: recursive
-      - name: Install build requirements
+      - name: Install build and Vulkan requirements
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev libpipewire-0.3-dev libpulse-dev libasound2-dev
-      - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
-      - name: Compile filesystem tests and dependencies
-        run: cmake --build build --target guest_wide_scan_tests guest_formatting_tests guest_scan_count_tests --parallel 2
-      - name: Repeat filesystem and path tests
-        run: ctest --test-dir build -R '^(guest_wide_scan|guest_formatting|guest_scan_count)$' --no-tests=error --output-on-failure --timeout 30 --output-log wide-scan-linux.log --output-junit wide-scan-linux.xml
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev libpipewire-0.3-dev libpulse-dev libasound2-dev libvulkan1 mesa-vulkan-drivers
+      - name: Configure all tests
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DANYPS5_ENABLE_SPIRV_TOOLS=ON
+      - run: python3 tools/check_test_registration.py build
+      - name: Build the project
+        run: cmake --build build --parallel 2
+      - name: Build all libraries
+        run: cmake --build build --target libs --parallel 2
+      - name: Run the full test suite
+        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --output-log full-linux.log --output-junit full-linux.xml
+        env:
+          ANYPS5_REQUIRE_VULKAN: 1
+          GALLIUM_OVERRIDE_CPU_CAPS: avx
+          MESA_SHADER_CACHE_DIR: ${{ github.workspace }}/.mesa-shader-cache
+      - name: Check omitted tests
+        if: always()
+        run: test ! -f full-linux.xml || python3 tools/check_skips.py full-linux.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: wide-scan-linux-results
-          path: wide-scan-linux.*
+          name: full-wide-scan-linux-results
+          path: full-linux.*
