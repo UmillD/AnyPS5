@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstdio>
+#include <source_location>
 
 extern "C" {
 int APS5_VABI snprintf_nid_postfix(char*, size_t, const char*, ...);
@@ -26,8 +27,8 @@ void APS5_VABI free_nid_postfix(void*);
 int* APS5_VABI __error_nid_postfix();
 }
 
-static void Require(bool condition) {
-    if (!condition) throw std::runtime_error("Formatting check failed");
+static void Require(bool condition, std::source_location location = std::source_location::current()) {
+    if (!condition) throw std::runtime_error("Formatting check failed at line " + std::to_string(location.line()));
 }
 
 static int APS5_VABI FormatList(char* buffer, size_t size, const char* format, ...) {

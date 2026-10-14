@@ -1,4 +1,6 @@
 #include "SceTypes.hpp"
+#include "prx/libc/include/ApplicationHeap.hpp"
+#include "prx/libc/include/GuestHeap.hpp"
 #include <array>
 #include <cstdarg>
 #include <cstdio>
@@ -20,7 +22,14 @@ static int ScanList(const char* input, const char* format, ...) {
     return result;
 }
 
+static void* APS5_VABI Allocate(std::size_t bytes) { return GuestHeap::GuestHeapAllocate_nid_postfix(bytes); }
+static void APS5_VABI Release(void* pointer) { GuestHeap::GuestHeapFree_nid_postfix(pointer); }
+static void* APS5_VABI Unused() { std::abort(); }
+
 int main() {
+    const std::array<void*, 10> api{reinterpret_cast<void*>(&Allocate), reinterpret_cast<void*>(&Release), reinterpret_cast<void*>(&Unused),
+        reinterpret_cast<void*>(&Unused), reinterpret_cast<void*>(&Unused), reinterpret_cast<void*>(&Unused), reinterpret_cast<void*>(&Unused)};
+    ApplicationHeapRegister_nid_no_patch(api.data());
     int failures = 0;
     for (const bool list : {false, true}) {
         for (const char* format : {"%2lc", "%2ls", "%2l[a-z]"}) {
