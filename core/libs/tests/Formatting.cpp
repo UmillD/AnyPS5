@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <cstdint>
 #include <cstdio>
+#include <source_location>
 
 extern "C" {
 int APS5_VABI snprintf_nid_postfix(char*, size_t, const char*, ...);
@@ -244,7 +245,7 @@ __attribute__((noinline)) static void APS5_VABI RunChecks() {
         try { sscanf_nid_postfix("ab cd", format, wide); } catch (const std::runtime_error&) { return wide[0] == u'!'; }
         return false;
     };
-    Require(rejects("%ls") && rejects("%*s %3lc") && rejects("%l[a-z]") && rejects("%S") && rejects("%2$C") && rejects("%'ls"));
+    Require(rejects("%S") && rejects("%2$C") && rejects("%'ls"));
     const auto secureRejects = [&](const char* format) {
         try { ScanListS("ab cd", format, wide, 4u); } catch (const std::runtime_error&) { return wide[0] == u'!'; }
         return false;
