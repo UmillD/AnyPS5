@@ -234,7 +234,7 @@ int ScanGuest(const char* buffer, const char* format, bool secure, NextPointer n
                 for (std::size_t i = 0; i < count; ++i) wide[i] = static_cast<unsigned char>(narrow.get()[i]);
                 if (conversion != 'c') wide[count] = u'\0';
             } else std::memcpy(destination, narrow.get(), units);
-            if (allocate) *static_cast<void**>(target) = destination;
+            if (allocate) std::memcpy(target, &destination, sizeof(destination));
         }
         input += consumed;
         converted = true;
@@ -438,7 +438,9 @@ int APS5_VABI sscanf_nid_postfix(const char* input, const char* format, ...) {
     RejectGuestWideScan(format, HasGuestWideScan(format));
     std::va_list args;
     va_start(args, format);
-    const int result = HasGuestWideScan(format) ? ScanGuest(input, format, false, [&] { return va_arg(args, void*); }, [] { return 0u; }) : HostVsscanf(input, format, args);
+    int result;
+    try { result = HasGuestWideScan(format) ? ScanGuest(input, format, false, [&] { return va_arg(args, void*); }, [] { return 0u; }) : HostVsscanf(input, format, args); }
+    catch (...) { va_end(args); throw; }
     va_end(args);
     return result;
 }
