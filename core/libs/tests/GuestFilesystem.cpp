@@ -173,11 +173,23 @@ static void TestParentTraversal() {
     Require(sceKernelStat("/parent-test-mount/existing/../present.txt", &status) == 0 && status.st_size == 9);
     RemovePathAlias_nid_no_patch("parent-test-mount");
     std::error_code linkError;
+#ifdef _WIN32
+    Require(CreateSymbolicLinkW((root / "directory-link").c_str(), L"Existing", SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
+#else
     std::filesystem::create_directory_symlink("Existing", root / "directory-link", linkError);
+#endif
     if (!linkError) {
         Require(sceKernelStat((root.generic_string() + "/directory-link/../present.txt").c_str(), &status) == 0 && status.st_size == 9);
+#ifdef _WIN32
+        Require(CreateSymbolicLinkW((root / "file-link").c_str(), L"present.txt", SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
+#else
         std::filesystem::create_symlink("present.txt", root / "file-link");
+#endif
+#ifdef _WIN32
+        Require(CreateSymbolicLinkW((root / "dangling-link").c_str(), L"missing", SYMBOLIC_LINK_FLAG_DIRECTORY | SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE) != 0);
+#else
         std::filesystem::create_directory_symlink("missing", root / "dangling-link");
+#endif
         checkInvalid(root.generic_string() + "/file-link/..", 20);
         checkInvalid(root.generic_string() + "/dangling-link/..", 2);
     }
