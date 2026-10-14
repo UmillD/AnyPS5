@@ -1,0 +1,35 @@
+name: Reproduce guest wide scanf on Linux
+
+on:
+  push:
+    branches: [validation/libc-wide-scan]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  filesystem:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Install build requirements
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev libpipewire-0.3-dev libpulse-dev libasound2-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+      - name: Compile filesystem tests and dependencies
+        run: cmake --build build --target guest_wide_scan_probe_tests --parallel 2
+      - name: Repeat filesystem and path tests
+        run: ctest --test-dir build -R '^guest_wide_scan_probe$' --no-tests=error --output-on-failure --timeout 30 --output-log wide-scan-linux.log --output-junit wide-scan-linux.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wide-scan-linux-results
+          path: wide-scan-linux.*
+
