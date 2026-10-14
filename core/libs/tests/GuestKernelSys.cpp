@@ -1,3 +1,4 @@
+#include "FilesystemTestCleanup.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libkernel/File/include/FileFlags.hpp"
 #include <chrono>
@@ -465,6 +466,6 @@ int main() {
     Require(fchmodat_nid_postfix(base, longName.c_str(), 0600, 0) == -1 && Error() == 63);
 #endif
     Require(sceKernelClose(base) == 0);
-    std::filesystem::remove_all(root);
+    TestFilesystem::RemoveTree(root);
     return 0;
 }

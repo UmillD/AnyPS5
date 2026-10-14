@@ -1,3 +1,4 @@
+#include "FilesystemTestCleanup.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <chrono>
 #include <cstdio>
@@ -60,6 +61,6 @@ int main() {
     Require(rename_nid_postfix(renamed.string().c_str(), nullptr) == -1 && *__error_nid_postfix() == 14);
     Require(rename_nid_postfix("", renamed.string().c_str()) == -1 && *__error_nid_postfix() == 2);
     Require(rename_nid_postfix(renamed.string().c_str(), "") == -1 && *__error_nid_postfix() == 2);
-    std::filesystem::remove_all(root);
+    TestFilesystem::RemoveTree(root);
     return 0;
 }
