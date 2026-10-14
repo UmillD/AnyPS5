@@ -1,0 +1,47 @@
+name: Validate readlink and Windows cleanup combination on Linux
+on:
+  push:
+    branches: [validation/readlink-final-cross-platform]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Install build and Vulkan requirements
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build python3 libx11-dev libxext-dev libxrandr-dev libpipewire-0.3-dev libpulse-dev libasound2-dev libvulkan1 mesa-vulkan-drivers
+      - name: Configure all tests
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DANYPS5_ENABLE_SPIRV_TOOLS=ON
+      - run: python3 tools/check_test_registration.py build
+      - name: Build the project
+        run: cmake --build build --parallel 2
+      - name: Build all libraries
+        run: cmake --build build --target libs --parallel 2
+      - name: Build affected runtime tests
+        run: cmake --build build --target filesystem_cleanup_tests guest_kernel_sys_tests guest_filesystem_tests guest_kernel_rename_tests guest_realpath_tests guest_path_case_tests guest_memory_tests agc_shader_disk_cache_tests --parallel 2
+      - name: Repeat affected runtime tests
+        run: ctest --test-dir build -R '^(filesystem_cleanup|guest_kernel_sys|guest_filesystem|guest_kernel_rename|guest_realpath|guest_path_case|guest_memory|agc_shader_disk_cache)$' --repeat until-fail:3 --no-tests=error --output-on-failure --timeout 30 --output-log "$PWD/focused-linux.log" --output-junit "$PWD/focused-linux.xml"
+      - name: Run the full test suite
+        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --output-log "$PWD/full-linux.log" --output-junit "$PWD/full-linux.xml"
+        env:
+          ANYPS5_REQUIRE_VULKAN: 1
+          GALLIUM_OVERRIDE_CPU_CAPS: avx
+          MESA_SHADER_CACHE_DIR: ${{ github.workspace }}/.mesa-shader-cache
+      - name: Check omitted tests
+        if: always()
+        run: test -s full-linux.xml && python3 tools/check_skips.py full-linux.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: readlink-final-linux-results
+          path: |
+            full-linux.*
+            focused-linux.*
