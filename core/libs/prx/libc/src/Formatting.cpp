@@ -62,13 +62,13 @@ bool HasGuestWideScan(const char* format) {
     }
     return false;
 }
-void RejectGuestWideScan(const char* format) {
+void RejectGuestWideScan(const char* format, bool allowStandard = false) {
     if (format == nullptr) return;
     while ((format = std::strchr(format, '%')) != nullptr) {
         ++format;
         if (*format == '%') { ++format; continue; }
         while (*format && std::strchr("-+ #0'0123456789.*$", *format)) ++format;
-        if (*format == 'S' || *format == 'C' || (*format == 'l' && format[1] != '\0' && std::strchr("sc[", format[1])))
+        if (*format == 'S' || *format == 'C' || (!allowStandard && *format == 'l' && format[1] != '\0' && std::strchr("sc[", format[1])))
             NotImplemented_nid_no_patch("scanf 16-bit wide conversion on Linux");
         if (*format == '[') {
             ++format;
@@ -401,6 +401,7 @@ int APS5_VABI vsscanf_nid_postfix(const char* input, const char* format, VaList*
     return LibcDetail::ScanWindows(input, format, args);
 #else
     if (HasGuestWideScan(format)) {
+        RejectGuestWideScan(format, true);
         LibcDetail::FormatArguments arguments(args);
         return ScanGuest(input, format, false, [&] { return arguments.Next<void*>(); }, [] { return 0u; });
     }
@@ -423,7 +424,7 @@ int APS5_VABI sscanf_nid_postfix(const char* input, const char* format, ...) {
 }
 #else
 int APS5_VABI sscanf_nid_postfix(const char* input, const char* format, ...) {
-    if (!HasGuestWideScan(format)) RejectGuestWideScan(format);
+    RejectGuestWideScan(format, HasGuestWideScan(format));
     std::va_list args;
     va_start(args, format);
     const int result = HasGuestWideScan(format) ? ScanGuest(input, format, false, [&] { return va_arg(args, void*); }, [] { return 0u; }) : HostVsscanf(input, format, args);
