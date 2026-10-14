@@ -35,7 +35,25 @@ int main() {
                 ++failures;
             }
         }
+        auto scan = list ? ScanList : sscanf_nid_postfix;
+        std::array<char16_t, 4> output{u'!', u'!', u'!', u'!'};
+        int count = -1;
+        int number = -1;
+        if (scan("  ab 42", "%2ls%n %d", output.data(), &count, &number) != 2 ||
+            output != std::array<char16_t, 4>{u'a', u'b', u'\0', u'!'} || count != 4 || number != 42) ++failures;
+        output.fill(u'!');
+        if (scan("abZ", "%*2lc%lc", output.data()) != 1 || output[0] != u'Z' || output[1] != u'!') ++failures;
+        output.fill(u'!');
+        if (scan("", "%lc", output.data()) != EOF || output[0] != u'!') ++failures;
+        if (scan("12", "%2l[a-z]", output.data()) != 0 || output[0] != u'!') ++failures;
+        if (scan("\xe9", "%lc", output.data()) != 1 || output[0] != 0xe9 || output[1] != u'!') ++failures;
+        output.fill(u'!');
+        if (scan("]x", "%2l[]x]", output.data()) != 1 ||
+            output != std::array<char16_t, 4>{u']', u'x', u'\0', u'!'}) ++failures;
+        output.fill(u'!');
+        if (scan("ab1", "%2l[^0-9]", output.data()) != 1 ||
+            output != std::array<char16_t, 4>{u'a', u'b', u'\0', u'!'}) ++failures;
     }
-    std::printf("wide scan failures: %d/6\n", failures);
+    std::printf("wide scan failures: %d\n", failures);
     return failures != 0;
 }
