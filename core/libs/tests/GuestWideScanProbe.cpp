@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <exception>
+#include <cstdlib>
 
 extern "C" int APS5_VABI sscanf_nid_postfix(const char*, const char*, ...);
 extern "C" int APS5_VABI vsscanf_nid_postfix(const char*, const char*, VaList*);
@@ -53,6 +54,21 @@ int main() {
         output.fill(u'!');
         if (scan("ab1", "%2l[^0-9]", output.data()) != 1 ||
             output != std::array<char16_t, 4>{u'a', u'b', u'\0', u'!'}) ++failures;
+        wchar_t native[4] = {L'!', L'!', L'!', L'!'};
+        output.fill(u'!');
+        const int expected = std::sscanf("a", "%2lc", native);
+        const int actual = scan("a", "%2lc", output.data());
+        std::printf("partial lc: host=%d guest=%d host[0]=%u guest[0]=%u\n", expected, actual,
+            static_cast<unsigned>(native[0]), static_cast<unsigned>(output[0]));
+        if (actual != expected) ++failures;
+        char* allocated = nullptr;
+        char* nativeAllocated = nullptr;
+        const int nativeMixed = std::sscanf("a word", "%lc %ms", native, &nativeAllocated);
+        const int guestMixed = scan("a word", "%lc %ms", output.data(), &allocated);
+        std::printf("allocated mixed: host=%d guest=%d\n", nativeMixed, guestMixed);
+        if (guestMixed != nativeMixed) ++failures;
+        std::free(nativeAllocated);
+        std::free(allocated);
     }
     std::printf("wide scan failures: %d\n", failures);
     return failures != 0;
