@@ -512,6 +512,33 @@ int main() {
         clearReparseTag(surrogate, 0x20000ABC);
     }
 #endif
+    std::array<char, sizeof(buffer)> unchangedBuffer;
+    unchangedBuffer.fill('#');
+    const auto checkPathFailure = [&](auto call, int expected) {
+        std::memcpy(buffer, unchangedBuffer.data(), sizeof(buffer));
+        Require(call() == -1 && Error() == expected);
+        Require(std::memcmp(buffer, unchangedBuffer.data(), sizeof(buffer)) == 0);
+    };
+    for (const std::size_t length : {std::size_t{1023}, std::size_t{1024}, std::size_t{1025}}) {
+        const auto longPath = root.generic_string() + std::string(length - root.generic_string().size(), '/');
+        const int expected = length < 1024 ? 22 : 63;
+        checkPathFailure([&] { return readlink_nid_postfix(longPath.c_str(), buffer, sizeof(buffer)); }, expected);
+        checkPathFailure([&] { return readlinkat_nid_postfix(-100, longPath.c_str(), buffer, sizeof(buffer)); }, expected);
+    }
+    const int pathLimitDirectory = sceKernelOpen(root.string().c_str(), SCE_KERNEL_O_RDONLY | SCE_KERNEL_O_DIRECTORY, 0);
+    Require(pathLimitDirectory >= 0);
+    for (const std::size_t length : {std::size_t{1023}, std::size_t{1024}, std::size_t{1025}}) {
+        const auto longPath = std::string(".") + std::string(length - 1, '/');
+        const int expected = length < 1024 ? 22 : 63;
+        checkPathFailure([&] { return readlinkat_nid_postfix(pathLimitDirectory, longPath.c_str(), buffer, sizeof(buffer)); }, expected);
+    }
+    Require(sceKernelClose(pathLimitDirectory) == 0);
+    const auto oversizedPath = std::string(1024, '/');
+    checkPathFailure([&] { return readlinkat_nid_postfix(-1, oversizedPath.c_str(), buffer, sizeof(buffer)); }, 63);
+    const auto oversizedRelativePath = std::string(".") + std::string(1023, '/');
+    checkPathFailure([&] { return readlinkat_nid_postfix(-1, oversizedRelativePath.c_str(), buffer, sizeof(buffer)); }, 63);
+    checkPathFailure([&] { return readlink_nid_postfix(oversizedPath.c_str(), buffer, hugeSize); }, 22);
+    checkPathFailure([&] { return readlinkat_nid_postfix(-1, oversizedRelativePath.c_str(), buffer, hugeSize); }, 22);
     std::error_code error;
     const auto link = (root / "link").string();
     std::filesystem::create_symlink("sub/target.txt", link, error);
